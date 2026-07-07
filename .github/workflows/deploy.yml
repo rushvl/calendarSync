@@ -23,8 +23,9 @@ jobs:
         run: npm ci
 
       - name: Create clasprc.json
-        run: |
-          echo "${{ secrets.CLASPRC_JSON }}" > ~/.clasprc.json
+        run: echo "$CLASPRC_JSON" > ~/.clasprc.json
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
 
       - name: Push to Apps Script
         run: npx clasp push
