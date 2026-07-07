@@ -48,8 +48,16 @@ function pollNtfy() {
   }
   
   const lines = text.trim().split('\n');
-  let latestMessageId = lastId;
+  let latestSuccessfulMessageId = lastId;
+  let hasFailedMessage = false;
   let messageCount = 0;
+  
+  // Load processed list & retry counts to prevent duplicates & infinite loops
+  let processedIdsProps = props.getProperty('PROCESSED_MESSAGE_IDS');
+  let processedIds = processedIdsProps ? JSON.parse(processedIdsProps) : [];
+  
+  let retryProps = props.getProperty('RETRY_COUNTS');
+  let retryCounts = retryProps ? JSON.parse(retryProps) : {};
   
   for (const line of lines) {
     if (!line) continue;
@@ -58,17 +66,41 @@ function pollNtfy() {
       msg = JSON.parse(line);
     } catch(e) { continue; }
     
-    // Track the latest message ID to prevent duplicates
-    if (msg.id) {
-      latestMessageId = msg.id;
-    }
-    
     // We only care about actual messages
     if (msg.event !== "message") continue;
     
     messageCount++;
     console.log(`[!] Found a new message! Title: "${msg.title || 'No Title'}"`);
-    processMessage(msg);
+    
+    let success = false;
+    
+    // Check if already processed
+    if (msg.id && processedIds.includes(msg.id)) {
+      console.log(`Notification ${msg.id} was already successfully processed. Skipping.`);
+      success = true;
+    } else if (msg.id && retryCounts[msg.id] >= 5) {
+      console.error(`Notification ${msg.id} has failed processing 5 times. Skipping permanently to avoid queue blocking.`);
+      success = true; // Treat as success to let queue advance
+      processedIds.push(msg.id);
+    } else {
+      success = processMessage(msg);
+      if (success) {
+        if (msg.id) {
+          processedIds.push(msg.id);
+          delete retryCounts[msg.id]; // Reset retry count on success
+        }
+      } else {
+        if (msg.id) {
+          retryCounts[msg.id] = (retryCounts[msg.id] || 0) + 1;
+        }
+        hasFailedMessage = true;
+      }
+    }
+    
+    // If this message succeeded and we haven't hit any failure yet, we can advance the last ID
+    if (success && !hasFailedMessage && msg.id) {
+      latestSuccessfulMessageId = msg.id;
+    }
   }
   
   if (messageCount === 0) {
@@ -77,9 +109,17 @@ function pollNtfy() {
     console.log(`Finished processing ${messageCount} new message(s).`);
   }
   
-  // Save the latest message ID so we don't process these again
-  if (latestMessageId && latestMessageId !== lastId) {
-    props.setProperty('LAST_MESSAGE_ID', latestMessageId);
+  // Prune processed ID history to keep it under 100 entries (to save Script Properties space)
+  if (processedIds.length > 100) {
+    processedIds = processedIds.slice(processedIds.length - 100);
+  }
+  
+  props.setProperty('PROCESSED_MESSAGE_IDS', JSON.stringify(processedIds));
+  props.setProperty('RETRY_COUNTS', JSON.stringify(retryCounts));
+  
+  // Save the latest successful consecutive message ID so we don't process these again
+  if (latestSuccessfulMessageId && latestSuccessfulMessageId !== lastId) {
+    props.setProperty('LAST_MESSAGE_ID', latestSuccessfulMessageId);
   }
 }
 
@@ -95,16 +135,16 @@ function processMessage(msg) {
   
   if (!extractedData) {
     console.error("Failed to extract data or Gemini API returned an error.");
-    return;
+    return false;
   }
   
   if (!extractedData.hasDateTime) {
     console.log("Skipping: Gemini determined the notification does NOT contain a valid date/time or deadline.");
-    return;
+    return true;
   }
   
   console.log(`Gemini extraction successful! Event Name: "${extractedData.title}". Adding to Calendar...`);
-  addToCalendar(extractedData);
+  return addToCalendar(extractedData);
 }
 
 function extractWithGemini(text) {
@@ -201,7 +241,7 @@ function addToCalendar(data) {
   const cal = CalendarApp.getCalendarById(CONFIG.CALENDAR_ID);
   if (!cal) {
     console.error("Calendar not found: " + CONFIG.CALENDAR_ID);
-    return;
+    return false;
   }
   
   const startTime = new Date(data.startTime);
@@ -214,7 +254,13 @@ function addToCalendar(data) {
     options.location = data.location;
   }
   
-  cal.createEvent(data.title, startTime, endTime, options);
-  console.log(`Success! Created event: ${data.title} at ${startTime}`);
+  try {
+    cal.createEvent(data.title, startTime, endTime, options);
+    console.log(`Success! Created event: ${data.title} at ${startTime}`);
+    return true;
+  } catch (e) {
+    console.error("Failed to create event in calendar: " + e);
+    return false;
+  }
 }
 
