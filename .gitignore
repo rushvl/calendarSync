@@ -1,0 +1,19 @@
+# Clasp credentials (must never be committed)
+.clasprc.json
+.clasprc.json.backup
+
+# Dependencies
+node_modules/
+
+# Local env / logs
+.env
+.env.*
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# OS metadata
+.DS_Store
+Thumbs.db
