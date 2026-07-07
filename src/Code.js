@@ -147,9 +147,43 @@ ${text}
     muteHttpExceptions: true
   };
   
-  const response = UrlFetchApp.fetch(url, options);
-  if (response.getResponseCode() !== 200) {
-    console.error("Gemini API error: " + response.getContentText());
+  let response;
+  let attempts = 0;
+  const maxAttempts = 3;
+  let delay = 1000; // Initial delay of 1 second
+  
+  while (attempts < maxAttempts) {
+    try {
+      response = UrlFetchApp.fetch(url, options);
+      const responseCode = response.getResponseCode();
+      if (responseCode === 200) {
+        break;
+      }
+      
+      console.warn(`Gemini API attempt ${attempts + 1} failed with response code ${responseCode}. Response: ${response.getContentText()}`);
+      
+      // Retry on 503 (Unavailable), 429 (Rate Limit / Resource Exhausted), or 500 (Internal Server Error)
+      if (responseCode !== 503 && responseCode !== 429 && responseCode !== 500) {
+        return null;
+      }
+    } catch (e) {
+      console.warn(`Gemini API attempt ${attempts + 1} failed with network/fetch error: ${e.toString()}`);
+    }
+    
+    attempts++;
+    if (attempts < maxAttempts) {
+      console.log(`Waiting ${delay}ms before retrying...`);
+      Utilities.sleep(delay);
+      delay *= 2; // Exponential backoff
+    }
+  }
+  
+  if (!response || response.getResponseCode() !== 200) {
+    if (response) {
+      console.error("Gemini API error after all retries: " + response.getContentText());
+    } else {
+      console.error("Gemini API error: Request failed completely.");
+    }
     return null;
   }
   
