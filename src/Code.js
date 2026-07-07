@@ -123,12 +123,40 @@ function pollNtfy() {
   }
 }
 
+function resolveActions(msg) {
+  let text = msg.message || "";
+  const actions = msg.actions;
+  
+  if (!actions || !Array.isArray(actions) || actions.length === 0) {
+    return text;
+  }
+  
+  // Replace <LABEL> placeholders case-insensitively
+  for (const action of actions) {
+    if (action.label && action.url) {
+      const escapedLabel = action.label.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+      const regex = new RegExp(`<${escapedLabel}>`, 'gi');
+      text = text.replace(regex, action.url);
+    }
+  }
+  
+  // Also append action links at the bottom to ensure Gemini sees them clearly
+  text += "\n\n--- Attached Links ---";
+  for (const action of actions) {
+    if (action.url) {
+      text += `\n${action.label || 'Link'}: ${action.url}`;
+    }
+  }
+  
+  return text;
+}
+
 function processMessage(msg) {
-  const rawText = msg.message;
   const title = msg.title || ""; 
+  const processedBody = resolveActions(msg);
   
   // Combine title, message, and any attachments/links to send to Gemini
-  const fullText = `Title: ${title}\nBody:\n${rawText}\nLink/Action: ${msg.click || ""}`;
+  const fullText = `Title: ${title}\nBody:\n${processedBody}\nLink/Action: ${msg.click || ""}`;
   
   console.log("Sending message to Gemini for parsing...");
   const extractedData = extractWithGemini(fullText);
