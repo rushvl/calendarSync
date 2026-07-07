@@ -283,8 +283,9 @@ function addToCalendar(data) {
   }
   
   try {
-    cal.createEvent(data.title, startTime, endTime, options);
-    console.log(`Success! Created event: ${data.title} at ${startTime}`);
+    const event = cal.createEvent(data.title, startTime, endTime, options);
+    event.addPopupReminder(10);
+    console.log(`Success! Created event: ${data.title} at ${startTime} with a 10-minute alert.`);
     return true;
   } catch (e) {
     console.error("Failed to create event in calendar: " + e);
